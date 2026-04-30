@@ -1,0 +1,268 @@
+configfile: "config.yaml"
+
+SRA_BIN = "tools/sratoolkit.3.3.0-ubuntu64/bin"
+TRIM_GALORE = "perl tools/TrimGalore-master/trim_galore"
+
+workdir: config["dir"]
+
+samples = config["samples"]
+reference_urls = config["reference_urls"]
+
+SAMPLE_REPS = [(ind, rep) for ind in samples for rep in samples[ind]]
+
+def get_sample_entry(wildcards):
+    if wildcards.ind not in samples:
+        raise ValueError(f"Individual {wildcards.ind} not found in config.")
+    if wildcards.replicate not in samples[wildcards.ind]:
+        raise ValueError(f"Replicate {wildcards.replicate} does not exist for {wildcards.ind}.")
+    return samples[wildcards.ind][wildcards.replicate]
+
+def get_sra(wildcards):
+    return get_sample_entry(wildcards)["sra"]
+
+def get_species(wildcards):
+    return get_sample_entry(wildcards)["species"]
+
+rule all:
+    input:
+        expand(
+            "results/windows/{ind}_{replicate}.50bp_windows.tsv.gz",
+            zip,
+            ind=[i for i, r in SAMPLE_REPS],
+            replicate=[r for i, r in SAMPLE_REPS]
+        ),
+        expand(
+            "results/summary/{ind}_{replicate}.global_methylation.txt",
+            zip,
+            ind=[i for i, r in SAMPLE_REPS],
+            replicate=[r for i, r in SAMPLE_REPS]
+        )
+
+rule prefetch_sra:
+    output:
+        "sra/{ind}_{replicate}.sra"
+    log:
+        "logs/prefetch_{ind}_{replicate}.out"
+    params:
+        sra=get_sra
+    shell:
+        """
+        mkdir -p sra logs
+        {SRA_BIN}/prefetch {params.sra} -O sra --max-size 100g > {log} 2>&1
+
+        srafile=$(find sra -type f -name "{params.sra}.sra" | head -n 1)
+        if [ -z "$srafile" ]; then
+          echo "ERROR: .sra file not found under sra/ after prefetch" >&2
+          find sra -maxdepth 3 -type f >&2
+          exit 1
+        fi
+
+        mv "$srafile" {output}
+        """
+
+rule fasterq_dump:
+    input:
+        "sra/{ind}_{replicate}.sra"
+    output:
+        "fastq/{ind}_{replicate}_1.fastq",
+        "fastq/{ind}_{replicate}_2.fastq"
+    log:
+        "logs/fasterq_dump_{ind}_{replicate}.out"
+    shell:
+        """
+        mkdir -p fastq fastq/tmp logs
+        {SRA_BIN}/fasterq-dump {input} --split-files --outdir fastq --temp fastq/tmp > {log} 2>&1
+        """
+
+rule trim_galore:
+    input:
+        r1="fastq/{ind}_{replicate}_1.fastq",
+        r2="fastq/{ind}_{replicate}_2.fastq"
+    output:
+        r1="results/trimmed/{ind}_{replicate}_1_val_1.fq",
+        r2="results/trimmed/{ind}_{replicate}_2_val_2.fq"
+    log:
+        "logs/trim_galore_{ind}_{replicate}.out"
+    shell:
+        """
+        mkdir -p results/trimmed logs
+        {TRIM_GALORE} --paired --phred33 --length 20 --quality 20 \
+          -o results/trimmed {input.r1} {input.r2} > {log} 2>&1
+        """
+
+rule download_reference:
+    output:
+        fasta="reference/{species}/genome.fa"
+    params:
+        url=lambda wc: reference_urls[wc.species]
+    log:
+        "logs/download_reference_{species}.out"
+    shell:
+        """
+        mkdir -p reference/{wildcards.species} logs
+        wget -O {output.fasta}.gz {params.url} > {log} 2>&1
+        gunzip -f {output.fasta}.gz
+        """
+
+rule bismark_genome_preparation:
+    input:
+        "reference/{species}/genome.fa"
+    output:
+        directory("reference/{species}/Bisulfite_Genome/CT_conversion")
+    log:
+        "logs/bismark_genome_preparation_{species}.log"
+    shell:
+        """
+        mkdir -p logs
+        bismark_genome_preparation --verbose reference/{wildcards.species}/ > {log} 2>&1
+        """
+
+rule bismark_mapping:
+    input:
+        r1="results/trimmed/{ind}_{replicate}_1_val_1.fq",
+        r2="results/trimmed/{ind}_{replicate}_2_val_2.fq",
+        genome_prepped=lambda wc: f"reference/{get_species(wc)}/Bisulfite_Genome/CT_conversion"
+    output:
+        bam="results/mapped/{ind}_{replicate}_bismark_bt2_pe.bam"
+    params:
+        genome_folder=lambda wc: f"reference/{get_species(wc)}/",
+        output_dir="results/mapped"
+    log:
+        "logs/bismark_{ind}_{replicate}.out"
+    threads: 8
+    shell:
+        """
+        mkdir -p {params.output_dir} logs
+
+        bismark -N 0 -p {threads} --parallel 2 -X 500 \
+          --genome_folder {params.genome_folder} \
+          -1 {input.r1} -2 {input.r2} \
+          -o {params.output_dir} > {log} 2>&1
+
+        bamfile=$(find {params.output_dir} -maxdepth 1 -type f -name "*{wildcards.ind}*{wildcards.replicate}*bismark_bt2_pe.bam" | head -n 1)
+        if [ -z "$bamfile" ]; then
+          echo "ERROR: expected BAM not found in {params.output_dir}" >&2
+          ls -lh {params.output_dir} >&2
+          exit 1
+        fi
+
+        mv "$bamfile" {output.bam}
+        """
+
+rule deduplicate_bismark:
+    input:
+        bam="results/mapped/{ind}_{replicate}_bismark_bt2_pe.bam"
+    output:
+        dedup_bam="results/deduplicated/{ind}_{replicate}.deduplicated.bam"
+    log:
+        "logs/deduplicate_bismark_{ind}_{replicate}.out"
+    shell:
+        """
+        mkdir -p results/deduplicated logs
+
+        deduplicate_bismark --paired --bam {input.bam} \
+          --output_dir results/deduplicated > {log} 2>&1
+
+        dedup=$(find results/deduplicated -maxdepth 1 -type f -name "*{wildcards.ind}*{wildcards.replicate}*deduplicated.bam" | head -n 1)
+        if [ -z "$dedup" ]; then
+          echo "ERROR: deduplicated BAM not found" >&2
+          ls -lh results/deduplicated >&2
+          exit 1
+        fi
+
+        mv "$dedup" {output.dedup_bam}
+        """
+
+rule bismark_methylation_extraction:
+    input:
+        bam="results/deduplicated/{ind}_{replicate}.deduplicated.bam"
+    output:
+        cov="results/methylation/{ind}_{replicate}.cov.gz"
+    params:
+        genome_folder=lambda wc: f"reference/{get_species(wc)}/"
+    log:
+        "logs/bismark_methylation_extraction_{ind}_{replicate}.out"
+    threads: 6
+    shell:
+        """
+        outdir=results/methylation/{wildcards.ind}_{wildcards.replicate}
+        mkdir -p "$outdir" logs
+
+        bismark_methylation_extractor -p --multicore {threads} --no_overlap \
+          --comprehensive --merge_non_CpG --bedGraph \
+          --cytosine_report --genome_folder {params.genome_folder} \
+          --output "$outdir" {input.bam} > {log} 2>&1
+
+        covfile=$(find "$outdir" -maxdepth 1 -type f -name "*.bismark.cov.gz" | head -n 1)
+        if [ -z "$covfile" ]; then
+          echo "ERROR: no .bismark.cov.gz file found in $outdir" >&2
+          ls -lh "$outdir" >&2
+          exit 1
+        fi
+
+        cp "$covfile" {output.cov}
+        """
+
+
+rule filter_cov:
+    input:
+        cov="results/methylation/{ind}_{replicate}.cov.gz"
+    output:
+        filtered="results/filtered/{ind}_{replicate}.cov.filtered_4_100.gz"
+    log:
+        "logs/filter_cov_{ind}_{replicate}.out"
+    shell:
+        """
+        mkdir -p results/filtered logs
+        zcat {input.cov} | awk '($5+$6)>=4 && ($5+$6)<=100' | gzip > {output.filtered} 2> {log}
+        """
+
+rule global_methylation:
+    input:
+        cov="results/filtered/{ind}_{replicate}.cov.filtered_4_100.gz"
+    output:
+        summary="results/summary/{ind}_{replicate}.global_methylation.txt"
+    log:
+        "logs/global_methylation_{ind}_{replicate}.out"
+    shell:
+        """
+        mkdir -p results/summary logs
+
+        zcat {input.cov} | awk '
+        BEGIN{{m=0;u=0}}
+        {{m+=$5; u+=$6}}
+        END{{
+            if (m+u > 0)
+                print "{wildcards.ind}_{wildcards.replicate}\\t"100*m/(m+u);
+            else
+                print "{wildcards.ind}_{wildcards.replicate}\\tNA";
+        }}' > {output.summary} 2> {log}
+        """
+
+rule window_50bp:
+    input:
+        cov="results/filtered/{ind}_{replicate}.cov.filtered_4_100.gz"
+    output:
+        windows="results/windows/{ind}_{replicate}.50bp_windows.tsv.gz"
+    log:
+        "logs/window_50bp_{ind}_{replicate}.out"
+    shell:
+        """
+        mkdir -p results/windows logs
+
+        zcat {input.cov} | awk '
+        {{
+            bin=int(($2-1)/50)*50;
+            key=$1"\t"bin"\t"(bin+49);
+
+            meth[key]+=$5;
+            unmeth[key]+=$6;
+        }}
+        END {{
+            for (k in meth) {{
+                total=meth[k]+unmeth[k];
+                if (total>0)
+                    print k"\t"100*meth[k]/total"\t"meth[k]"\t"unmeth[k];
+            }}
+        }}' | sort -k1,1 -k2,2n | gzip > {output.windows} 2> {log}
+        """

@@ -1,0 +1,69 @@
+dir: /home/alp/irt3_preanalysis
+
+reference_urls:
+  AC: https://ftp.ncbi.nlm.nih.gov/geo/series/GSE158nnn/GSE158514/suppl/GSE158514_AC_SNPcorrected_MZgenome.fa.gz
+
+samples:
+  ind1:
+    replicate1:
+      sra: SRR14475422
+      species: AC
+      ecomorph: benthic
+    replicate2:
+      sra: SRR14475426
+      species: AC
+      ecomorph: benthic
+
+  ind2:
+    replicate1:
+      sra: SRR14475423
+      species: AC
+      ecomorph: benthic
+    replicate2:
+      sra: SRR14475427
+      species: AC
+      ecomorph: benthic
+
+  ind3:
+    replicate1:
+      sra: SRR14475435
+      species: AC
+      ecomorph: benthic
+
+  ind4:
+    replicate1:
+      sra: SRR14475421
+      species: AC
+      ecomorph: littoral
+    replicate2:
+      sra: SRR14475428
+      species: AC
+      ecomorph: littoral
+
+  ind5:
+    replicate1:
+      sra: SRR14475436
+      species: AC
+      ecomorph: littoral
+
+  ind6:
+    replicate1:
+      sra: SRR14475419
+      species: AC
+      ecomorph: riverine
+    replicate2:
+      sra: SRR14475424
+      species: AC
+      ecomorph: riverine
+
+  ind7:
+    replicate1:
+      sra: SRR14475420
+      species: AC
+      ecomorph: riverine
+    replicate2:
+      sra: SRR14475425
+      species: AC
+      ecomorph: riverine      
+
+ 

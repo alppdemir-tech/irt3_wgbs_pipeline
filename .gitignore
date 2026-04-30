@@ -1,0 +1,21 @@
+# Ignore large data files
+*.fastq
+*.fastq.gz
+*.bam
+*.bw
+*.bedGraph
+*.cov.gz
+
+# Ignore results folders
+results/
+comparison_work/output/
+
+# Ignore logs
+logs/
+
+# Ignore temp files
+*.tmp
+*.log
+
+# OS / editor
+.DS_Store
