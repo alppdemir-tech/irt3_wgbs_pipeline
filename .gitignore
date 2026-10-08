@@ -19,3 +19,15 @@ logs/
 
 # OS / editor
 .DS_Store
+
+# Local environments and workflow state
+.conda/
+.snakemake/
+
+# Large local input/reference data
+sra/
+reference/
+
+# Generated local files
+dag.png
+*.code-workspace
