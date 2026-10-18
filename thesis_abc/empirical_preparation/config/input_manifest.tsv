@@ -1,0 +1,8 @@
+population	individual	cov_path
+benthic	ind1	/home/alp/irt3_preanalysis/abc_prevalidation/rerun_benthic/results/methylation/ind1.cov.gz
+benthic	ind2	/home/alp/irt3_preanalysis/abc_prevalidation/rerun_benthic/results/methylation/ind2.cov.gz
+benthic	ind3	/home/alp/irt3_preanalysis/abc_prevalidation/rerun_benthic/results/methylation/ind3.cov.gz
+littoral	ind4	/home/alp/masters_thesis_data/preprocessing/methylation/ind4.cov.gz
+littoral	ind5	/home/alp/masters_thesis_data/preprocessing/methylation/ind5.cov.gz
+riverine	ind6	/home/alp/masters_thesis_data/preprocessing/methylation/ind6.cov.gz
+riverine	ind7	/home/alp/masters_thesis_data/preprocessing/methylation/ind7.cov.gz
